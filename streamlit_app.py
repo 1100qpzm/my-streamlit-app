@@ -4,8 +4,10 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 import os
 import threading
+import hashlib
 import numpy as np
 import pandas as pd
+import pydeck as pdk
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -72,6 +74,23 @@ def distance_km(lat, lon, lats, lons):
     a, b = np.radians(lat), np.radians(lats)
     h = np.sin((b-a)/2)**2 + np.cos(a)*np.cos(b)*np.sin(np.radians(lons-lon)/2)**2
     return 6371.0088 * 2 * np.arcsin(np.sqrt(np.clip(h, 0, 1)))
+
+
+def select_from_map(map_key, ids):
+    objects = st.session_state[map_key]["selection"]["objects"].get("arcades", [])
+    if objects and objects[0].get("ID") in ids:
+        selected = objects[0]["ID"]
+        st.session_state.selected_arcade = selected
+        st.session_state.arcade_table = {"selection": {"rows": [ids.index(selected)]}}
+
+
+def select_from_table(ids):
+    selection = st.session_state.arcade_table["selection"]
+    rows = selection.get("rows", [])
+    cells = selection.get("cells", [])
+    row = cells[0][0] if cells else rows[0] if rows else None
+    st.session_state.selected_arcade = ids[row] if row is not None and row < len(ids) else None
+    st.session_state.arcade_table = {"selection": {"rows": [row] if row is not None else [], "cells": []}}
 
 
 st.title("🕹️ 내 주변 오락실 탐색")
@@ -149,15 +168,45 @@ else:
     st.subheader(f"가장 가까운 곳: {closest['BPLC_NM']}")
     st.write(f"{closest['주소']} / 직선거리 {closest['거리 (km)']:.2f} km")
     st.header("위치 지도")
-    points = near[["latitude", "longitude"]].copy()
-    points["color"] = "#6d5dfc"
-    points = pd.concat([points, pd.DataFrame([{"latitude": lat, "longitude": lon, "color": "#f97316"}])])
-    st.map(points, color="color", size=35)
-    st.caption("보라색: 오락실 / 주황색: 검색 기준 위치")
+    ids = near["ID"].tolist()
+    selected = st.session_state.get("selected_arcade")
+    if selected not in ids:
+        selected = None
+        st.session_state.selected_arcade = None
+    signature = hashlib.sha1("|".join(ids).encode()).hexdigest()[:16]
+    if st.session_state.get("result_signature") != signature:
+        st.session_state.result_signature = signature
+        st.session_state.arcade_table = {"selection": {"rows": [ids.index(selected)] if selected else []}}
+    points = near[["ID", "BPLC_NM", "주소", "latitude", "longitude"]].copy()
+    points["color"] = [[0, 175, 205] if ident == selected else [109, 93, 252] for ident in ids]
+    points["radius"] = [10 if ident == selected else 6 for ident in ids]
+    points["outline"] = [[255, 130, 30] if ident == selected else [255, 255, 255] for ident in ids]
+    if selected:
+        chosen = near.loc[near["ID"] == selected].iloc[0]
+        view = pdk.ViewState(latitude=float(chosen.latitude), longitude=float(chosen.longitude), zoom=14)
+        st.info(f"선택한 오락실: {chosen['BPLC_NM']} / 목록 {ids.index(selected)+1:,}행 / {chosen['주소']}")
+    else:
+        bounds = pdk.data_utils.compute_view(points[["longitude", "latitude"]])
+        view = pdk.ViewState(latitude=bounds.latitude, longitude=bounds.longitude, zoom=bounds.zoom)
+    layers = [
+        pdk.Layer("ScatterplotLayer", id="arcades", data=points, get_position="[longitude, latitude]",
+            get_fill_color="color", get_line_color="outline", get_radius="radius", radius_units=pdk.types.String("pixels"),
+            stroked=True, get_line_width=2, line_width_units=pdk.types.String("pixels"), pickable=True, auto_highlight=True),
+        pdk.Layer("ScatterplotLayer", id="origin", data=[{"longitude": lon, "latitude": lat}],
+            get_position="[longitude, latitude]", get_fill_color=[249, 115, 22], get_radius=8,
+            radius_units=pdk.types.String("pixels"), pickable=False),
+    ]
+    map_key = f"arcade_map_{signature}"
+    st.pydeck_chart(pdk.Deck(layers=layers, initial_view_state=view,
+        map_style="https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
+        tooltip={"text": "{BPLC_NM}\n{주소}"}), key=map_key, on_select=lambda: select_from_map(map_key, ids),
+        selection_mode="single-object", height=480)
+    st.caption("보라색: 오락실 / 주황색: 기준 위치 / 청록색과 주황 테두리: 선택한 오락실. 점과 목록 행을 클릭하면 서로 연동됩니다.")
     st.header("오락실 목록")
     shown = near.rename(columns={"BPLC_NM": "사업장명", "PVSN_VG_NM": "제공게임물", "FBCTN_HNDL_ITEM_CN": "게임 품목", "DTL_SALS_STTS_NM": "영업상태"})
     columns = ["사업장명", "거리 (km)", "게임기 수", "인허가일", "주소", "게임 품목"]
-    st.dataframe(shown[columns], hide_index=True, width="stretch",
+    st.dataframe(shown[columns].reset_index(drop=True), hide_index=True, width="stretch",
+        key="arcade_table", on_select=lambda: select_from_table(ids), selection_mode=["single-row", "single-cell"],
         column_config={"거리 (km)": st.column_config.NumberColumn(format="%.2f"), "인허가일": st.column_config.DateColumn(format="YYYY-MM-DD")})
     st.header("주변 오락실 비교")
     chart = st.radio("차트 선택", ["게임기 수 비교", "연도별 인허가 수"], horizontal=True)
