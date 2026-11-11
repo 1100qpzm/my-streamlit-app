@@ -1,6 +1,7 @@
-streamlit>=1.45,<2
+streamlit>=1.57,<2
 pandas>=2.2,<4
 numpy>=1.26,<3
 requests>=2.32,<3
 pyproj>=3.6,<4
 streamlit-js-eval==1.0.0
+pydeck>=0.9,<1
