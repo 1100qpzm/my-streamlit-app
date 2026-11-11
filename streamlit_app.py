@@ -37,7 +37,7 @@ def prepare(raw):
 
 
 @st.cache_data(ttl=3600, show_spinner="전국 오락실의 최신 정보를 조회하고 있어요...")
-def live_data(region, _key):
+def live_data(_key):
     connections = threading.local()
     def page(number):
         if not hasattr(connections, "session"):
@@ -46,8 +46,6 @@ def live_data(region, _key):
             connections.session.mount("https://", HTTPAdapter(max_retries=retry))
         params = {"serviceKey": _key, "pageNo": number,
             "numOfRows": 100, "returnType": "json", "cond[SALS_STTS_CD::EQ]": "01"}
-        if region != "전국":
-            params["cond[ROAD_NM_ADDR::LIKE]"] = region
         r = connections.session.get(API, params=params, timeout=(8, 20))
         r.raise_for_status()
         result = r.json()["response"]
@@ -79,7 +77,6 @@ def distance_km(lat, lon, lats, lons):
 st.title("🕹️ 내 주변 오락실 탐색")
 st.write("가까운 오락실부터, 게임기가 많은 곳과 최근 인허가된 곳까지 찾아보세요.")
 st.sidebar.header("내 위치와 검색 조건")
-region = st.sidebar.selectbox("조회 지역", ["서울특별시", "부산광역시", "대구광역시", "인천광역시", "광주광역시", "대전광역시", "울산광역시", "세종특별자치시", "경기도", "강원", "충청북도", "충청남도", "전북", "전라남도", "경상북도", "경상남도", "제주", "전국"])
 if st.sidebar.button("최신 데이터 불러오기", width="stretch"):
     live_data.clear()
 key = os.environ.get("LOCALDATA_API_KEY", "")
@@ -90,8 +87,8 @@ if not key:
         pass
 if key:
     try:
-        data, fetched = live_data(region, key)
-        st.caption(f"API 조회 {fetched} KST / 1시간 캐시 / {region} 영업 중 사업장 {len(data):,}곳")
+        data, fetched = live_data(key)
+        st.caption(f"API 조회 {fetched} KST / 1시간 캐시 / 전국 영업 중 사업장 {len(data):,}곳")
     except Exception:
         data = saved_data()
         st.warning("API 연결이 지연되어 2026-11-11 저장 데이터를 표시합니다. 잠시 후 최신 데이터를 다시 불러오세요.")
@@ -99,9 +96,6 @@ else:
     data = saved_data()
     st.info("2026-11-11 API 수집 데이터를 표시합니다. 실시간 조회는 앱의 API 키 설정 후 사용할 수 있습니다.")
 st.caption("원본 데이터는 매일 갱신되며 2일 전 기준으로 현행화됩니다. 거리는 직선거리입니다.")
-if region != "전국":
-    data = data[data["주소"].str.contains(region, regex=False)].copy()
-st.sidebar.caption("다른 지역이나 지역 경계의 오락실도 찾으려면 조회 지역을 전국으로 선택하세요.")
 presets = {"서울대학교 정문": (37.4663, 126.9485), "강남역": (37.4979, 127.0276),
            "홍대입구역": (37.5572, 126.9245), "부산 서면역": (35.1578, 129.0592), "직접 입력": (37.5665, 126.9780)}
 place = st.sidebar.selectbox("기준 위치", list(presets))
@@ -121,7 +115,7 @@ if st.sidebar.checkbox("기기에서 현재 위치 가져오기"):
 use_radius = st.sidebar.checkbox("검색 반경 필터 사용", value=True)
 radius = st.sidebar.slider("검색 반경 (km)", 1, 100, 5, disabled=not use_radius)
 if not use_radius:
-    st.sidebar.caption("거리 제한 없이 선택한 조회 지역에서 검색합니다.")
+    st.sidebar.caption("거리 제한 없이 전국에서 검색합니다.")
 minimum = st.sidebar.slider("최소 게임기 수", 0, 200, 0, step=5)
 include_missing = st.sidebar.checkbox("게임기 수 미등록 포함", value=True)
 years = st.sidebar.slider("인허가 연도", 1950, datetime.now().year, (1950, datetime.now().year))
@@ -147,7 +141,7 @@ a, b, c = st.columns(3)
 a.metric("조건에 맞는 오락실", f"{len(near):,}곳")
 b.metric("가장 가까운 거리", f"{near['거리 (km)'].min():.2f} km" if len(near) else "검색 결과 없음")
 c.metric("게임기 수 등록 사업장", f"{near['게임기 수'].notna().sum():,}곳")
-st.caption(f"검색 기준 {lat:.5f}, {lon:.5f} / 좌표 누락 또는 범위 오류로 거리 검색에서 제외한 조회 지역 사업장 {(~valid).sum():,}곳")
+st.caption(f"검색 기준 {lat:.5f}, {lon:.5f} / 좌표 누락 또는 범위 오류로 거리 검색에서 제외한 전국 사업장 {(~valid).sum():,}곳")
 if near.empty:
     st.info("검색 결과가 없어요. 검색 반경을 늘리거나 게임기 수와 연도 조건을 넓혀보세요.")
 else:
