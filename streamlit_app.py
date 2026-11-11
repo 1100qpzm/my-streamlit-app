@@ -118,7 +118,10 @@ if st.sidebar.checkbox("기기에서 현재 위치 가져오기"):
         st.sidebar.warning("현재 위치를 가져오지 못했어요. 좌표를 직접 입력해 주세요.")
     else:
         st.sidebar.info("위치 확인 중입니다. 확인 전에는 입력한 위치를 사용합니다.")
-radius = st.sidebar.slider("검색 반경 (km)", 1, 100, 5)
+use_radius = st.sidebar.checkbox("검색 반경 필터 사용", value=True)
+radius = st.sidebar.slider("검색 반경 (km)", 1, 100, 5, disabled=not use_radius)
+if not use_radius:
+    st.sidebar.caption("거리 제한 없이 선택한 조회 지역에서 검색합니다.")
 minimum = st.sidebar.slider("최소 게임기 수", 0, 200, 0, step=5)
 include_missing = st.sidebar.checkbox("게임기 수 미등록 포함", value=True)
 years = st.sidebar.slider("인허가 연도", 1950, datetime.now().year, (1950, datetime.now().year))
@@ -127,7 +130,9 @@ order = st.sidebar.radio("정렬", ["가까운 순", "게임기 많은 순", "�
 valid = data["latitude"].between(33, 39.5) & data["longitude"].between(124, 132)
 near = data.loc[valid].copy()
 near["거리 (km)"] = distance_km(lat, lon, near["latitude"], near["longitude"])
-near = near[(near["거리 (km)"] <= radius) & near["인허가일"].dt.year.between(*years)]
+if use_radius:
+    near = near[near["거리 (km)"] <= radius]
+near = near[near["인허가일"].dt.year.between(*years)]
 machine_match = near["게임기 수"] >= minimum
 if include_missing:
     machine_match |= near["게임기 수"].isna()
@@ -157,7 +162,7 @@ else:
     st.caption("보라색: 오락실 / 주황색: 검색 기준 위치")
     st.header("오락실 목록")
     shown = near.rename(columns={"BPLC_NM": "사업장명", "PVSN_VG_NM": "제공게임물", "FBCTN_HNDL_ITEM_CN": "게임 품목", "DTL_SALS_STTS_NM": "영업상태"})
-    columns = ["사업장명", "거리 (km)", "게임기 수", "인허가일", "주소", "제공게임물", "게임 품목", "영업상태"]
+    columns = ["사업장명", "거리 (km)", "게임기 수", "인허가일", "주소", "게임 품목"]
     st.dataframe(shown[columns], hide_index=True, width="stretch",
         column_config={"거리 (km)": st.column_config.NumberColumn(format="%.2f"), "인허가일": st.column_config.DateColumn(format="YYYY-MM-DD")})
     st.header("주변 오락실 비교")
